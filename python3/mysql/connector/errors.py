@@ -197,7 +197,8 @@ class Error(Exception):
         return self._full_msg
 
 
-class Warning(Exception):  # pylint: disable=W0622
+PythonWarning = Warning
+class Warning(PythonWarning):  # pylint: disable=W0622
     """Exception for important warnings"""
     pass
 
