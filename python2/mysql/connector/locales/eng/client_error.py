@@ -24,8 +24,8 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA 
 
 # This file was auto-generated.
-_GENERATED_ON = '2014-02-13'
-_MYSQL_VERSION = (5, 7, 3)
+_GENERATED_ON = '2014-04-03'
+_MYSQL_VERSION = (5, 7, 4)
 
 # Start MySQL Error messages
 CR_UNKNOWN_ERROR = u"Unknown MySQL error"

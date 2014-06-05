@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2013, 2014 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -36,19 +36,37 @@ def _calc_ratio(part, whole):
         decimal.Decimal('1'), rounding=decimal.ROUND_HALF_DOWN))
 
 
-class WeightedRoundRobin(object):
+class BaseScheduling(object):
 
-    """Class for doing Weighted Round Robin balancing"""
+    """Base class for all scheduling classes dealing with load balancing"""
 
-    def __init__(self, *args):
-        """Initializing"""
+    def __init__(self):
+        """Initialize"""
         self._members = []
-        self._sum_weights = 0
         self._ratios = []
-        self._load = []
 
-        if args:
-            self.set_members(*args)
+    def set_members(self, *args):
+        """Set members and ratios
+
+        This methods sets the members using the arguments passed. Each
+        argument must be a sequence where the second item is the weight.
+        The first element is an identifier. For example:
+
+            ('server1', 0.6), ('server2', 0.8)
+
+        Setting members means that the load will be reset. If the members
+        are the same as previously set, nothing will be reset or set.
+
+        If no arguments were given the members will be set to an empty
+        list.
+
+        Raises ValueError when weight can't be converted to a Decimal.
+        """
+        raise NotImplementedError
+
+    def get_next(self):
+        """Returns the next member"""
+        raise NotImplementedError
 
     @property
     def members(self):
@@ -60,25 +78,31 @@ class WeightedRoundRobin(object):
         """Returns the ratios for all members"""
         return self._ratios
 
+
+class WeightedRoundRobin(BaseScheduling):
+
+    """Class for doing Weighted Round Robin balancing"""
+
+    def __init__(self, *args):
+        """Initializing"""
+        super(WeightedRoundRobin, self).__init__()
+        self._load = []
+        self._next_member = 0
+        self._nr_members = 0
+
+        if args:
+            self.set_members(*args)
+
     @property
     def load(self):
         """Returns the current load"""
         return self._load
 
     def set_members(self, *args):
-        """Set members and ratios
-
-        This methods sets thes members using the arguments passed. Each
-        argument must be a sequence second item is the weight. The first
-        element is an identifier. For example:
-
-            ('server1', 0.6), ('server2', 0.8)
-
-        Setting members means that the load will be reset. If the members
-        are the same as previously set, nothing will be reset or set.
-
-        Raises ValueError when weight can't be converted to a Decimal.
-        """
+        if not args:
+            # Reset members if nothing was given
+            self._members = []
+            return
         new_members = []
         for member in args:
             member = list(member)
@@ -88,30 +112,41 @@ class WeightedRoundRobin(object):
                 raise ValueError("Member '{member}' is invalid".format(
                     member=member))
             new_members.append(tuple(member))
+
         new_members.sort(key=lambda x: x[1], reverse=True)
         if self._members == new_members:
             return
         self._members = new_members
-        self._members.sort(key=lambda x: x[1], reverse=True)
+        self._nr_members = len(new_members)
 
-        self._sum_weights = sum([i[1] for i in self._members])
+        min_weight = min(i[1] for i in self._members)
         self._ratios = []
         for _, weight in self._members:
-            self._ratios.append(_calc_ratio(weight, self._sum_weights))
+            self._ratios.append(int(weight/min_weight * 100))
         self.reset()
 
     def reset(self):
         """Reset the load"""
-        self._load = [0] * len(self._members)
+        self._next_member = 0
+        self._load = [0] * self._nr_members
 
     def get_next(self):
         """Returns the next member"""
         if self._ratios == self._load:
             self.reset()
-        for i, ratio in enumerate(self._ratios):
-            if self._load[i] < ratio:
-                self._load[i] += 1
-                return self._members[i]
+
+        # Figure out the member to return
+        current = self._next_member
+
+        while self._load[current] == self._ratios[current]:
+            current = (current + 1) % self._nr_members
+
+        # Update the load and set next member
+        self._load[current] += 1
+        self._next_member = (current + 1) % self._nr_members
+
+        # Return current
+        return self._members[current]
 
     def __repr__(self):
         return "{class_}(load={load}, ratios={ratios})".format(

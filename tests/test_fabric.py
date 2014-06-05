@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2013, 2014 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -24,6 +24,7 @@
 """Unittests for mysql.connector.fabric
 """
 
+from decimal import Decimal
 import sys
 import uuid
 
@@ -126,19 +127,22 @@ class _MockupXMLProxy(object):
     @property
     def server(self):
         class Server(object):
-            def set_status(self, server_uuid, status):
-                return (server_uuid, status)
+            @staticmethod
+            def set_status(server_uuid, status):
+                return server_uuid, status
 
         return Server()
 
     @property
     def threat(self):
         class Threat(object):
-            def report_failure(self, server_uuid, reporter, status):
-                return (server_uuid, status)
+            @staticmethod
+            def report_failure(server_uuid, reporter, status):
+                return server_uuid, status
 
-            def report_error(self, server_uuid, reporter, status):
-                return (server_uuid, status)
+            @staticmethod
+            def report_error(server_uuid, reporter, status):
+                return server_uuid, status
 
         return Threat()
 
@@ -371,9 +375,8 @@ class ConnectionModuleTests(tests.MySQLConnectorTests):
             'key': '/path/to/key',
             'cert': '/path/to/cert',
         }
-        self.assertEqual(exp,
-                         func(ssl_ca=exp['ca'], ssl_cert=exp['cert'],
-                                ssl_key=exp['key']))
+        res = func(ssl_ca=exp['ca'], ssl_cert=exp['cert'], ssl_key=exp['key'])
+        self.assertEqual(exp, res)
 
     def test_extra_failure_report(self):
         func = connection.extra_failure_report
@@ -415,6 +418,9 @@ class FabricTests(tests.MySQLConnectorTests):
             '_init_host': _HOST,
             '_init_port': _PORT,
             '_ssl': None,
+            '_username': None,
+            '_password': None,
+            '_report_errors': False,
         }
 
         for attr, default in attrs.items():
@@ -441,6 +447,15 @@ class FabricTests(tests.MySQLConnectorTests):
                             ssl_key=exp['key'])
 
         self.assertEqual(exp, fab._ssl)
+
+        # Check user/username
+        self.assertRaises(ValueError, fabric.Fabric, _HOST, username='ham',
+                          user='spam')
+        fab = fabric.Fabric(_HOST, username='spam')
+        self.assertEqual('spam', fab._username)
+        fab = fabric.Fabric(_HOST, user='ham')
+        self.assertEqual('ham', fab._username)
+
 
     def test_seed(self):
         fab = _MockupFabric(_HOST, _PORT)
@@ -926,6 +941,7 @@ class MySQLFabricConnectionTests(tests.MySQLConnectorTests):
 
 
 class FabricConnectorPythonTests(tests.MySQLConnectorTests):
+
     """Testing mysql.connector.connect()"""
 
     def setUp(self):
@@ -946,3 +962,141 @@ class FabricConnectorPythonTests(tests.MySQLConnectorTests):
             connection.MySQLFabricConnection
         ))
 
+
+class FabricBalancingBaseScheduling(tests.MySQLConnectorTests):
+
+    """Test fabric.balancing.BaseScheduling"""
+
+    def setUp(self):
+        self.obj = balancing.BaseScheduling()
+
+    def test___init__(self):
+        self.assertEqual([], self.obj._members)
+        self.assertEqual([], self.obj._ratios)
+
+    def test_set_members(self):
+        self.assertRaises(NotImplementedError, self.obj.set_members, 'spam')
+
+    def test_get_next(self):
+        self.assertRaises(NotImplementedError, self.obj.get_next)
+
+
+class FabricBalancingWeightedRoundRobin(tests.MySQLConnectorTests):
+
+    """Test fabric.balancing.WeightedRoundRobin"""
+
+    def test___init__(self):
+        balancer = balancing.WeightedRoundRobin()
+        self.assertEqual([], balancer._members)
+        self.assertEqual([], balancer._ratios)
+        self.assertEqual([], balancer._load)
+
+        # init with args
+        class FakeWRR(balancing.WeightedRoundRobin):
+            def set_members(self, *args):
+                self.set_members_called = True
+        balancer = FakeWRR('ham', 'spam')
+        self.assertTrue(balancer.set_members_called)
+
+    def test_members(self):
+        balancer = balancing.WeightedRoundRobin()
+        self.assertEqual([], balancer.members)
+        balancer._members = ['ham']
+        self.assertEqual(['ham'], balancer.members)
+
+    def test_ratios(self):
+        balancer = balancing.WeightedRoundRobin()
+        self.assertEqual([], balancer.ratios)
+        balancer._ratios = ['ham']
+        self.assertEqual(['ham'], balancer.ratios)
+
+    def test_load(self):
+        balancer = balancing.WeightedRoundRobin()
+        self.assertEqual([], balancer.load)
+        balancer._load = ['ham']
+        self.assertEqual(['ham'], balancer.load)
+
+    def test_set_members(self):
+        balancer = balancing.WeightedRoundRobin()
+        balancer._members = ['ham']
+        balancer.set_members()
+        self.assertEqual([], balancer.members)
+
+        servers = [('ham1', 0.2), ('ham2', 0.8)]
+
+        balancer.set_members(*servers)
+        exp = [('ham2', Decimal('0.8')), ('ham1', Decimal('0.2'))]
+        self.assertEqual(exp, balancer.members)
+        self.assertEqual([400, 100], balancer.ratios)
+        self.assertEqual([0, 0], balancer.load)
+
+    def test_reset_load(self):
+        balancer = balancing.WeightedRoundRobin(*[('ham1', 0.2), ('ham2', 0.8)])
+        balancer._load = [5, 6]
+        balancer.reset()
+        self.assertEqual([0, 0], balancer.load)
+
+    def test_get_next(self):
+        servers = [('ham1', 0.2), ('ham2', 0.8)]
+        balancer = balancing.WeightedRoundRobin(*servers)
+        self.assertEqual(('ham2', Decimal('0.8')), balancer.get_next())
+        self.assertEqual([1, 0], balancer.load)
+        balancer._load = [80, 0]
+        self.assertEqual(('ham1', Decimal('0.2')), balancer.get_next())
+        self.assertEqual([80, 1], balancer.load)
+        balancer._load = [80, 20]
+        self.assertEqual(('ham2', Decimal('0.8')), balancer.get_next())
+        self.assertEqual([81, 20], balancer.load)
+
+        servers = [('ham1', 0.1), ('ham2', 0.2), ('ham3', 0.7)]
+        balancer = balancing.WeightedRoundRobin(*servers)
+        exp_sum = count = 101
+        while count > 0:
+            count -= 1
+            _ = balancer.get_next()
+        self.assertEqual(exp_sum, sum(balancer.load))
+        self.assertEqual([34, 34, 33], balancer.load)
+
+        servers = [('ham1', 0.2), ('ham2', 0.2), ('ham3', 0.7)]
+        balancer = balancing.WeightedRoundRobin(*servers)
+        exp_sum = count = 101
+        while count > 0:
+            count -= 1
+            _ = balancer.get_next()
+        self.assertEqual(exp_sum, sum(balancer.load))
+        self.assertEqual([34, 34, 33], balancer.load)
+
+        servers = [('ham1', 0.25), ('ham2', 0.25),
+                   ('ham3', 0.25), ('ham4', 0.25)]
+        balancer = balancing.WeightedRoundRobin(*servers)
+        exp_sum = count = 101
+        while count > 0:
+            count -= 1
+            _ = balancer.get_next()
+        self.assertEqual(exp_sum, sum(balancer.load))
+        self.assertEqual([26, 25, 25, 25], balancer.load)
+
+        servers = [('ham1', 0.5), ('ham2', 0.5)]
+        balancer = balancing.WeightedRoundRobin(*servers)
+        count = 201
+        while count > 0:
+            count -= 1
+            _ = balancer.get_next()
+        self.assertEqual(1, sum(balancer.load))
+        self.assertEqual([1, 0], balancer.load)
+
+    def test___repr__(self):
+        balancer = balancing.WeightedRoundRobin(*[('ham1', 0.2), ('ham2', 0.8)])
+        exp = ("<class 'mysql.connector.fabric.balancing.WeightedRoundRobin'>"
+               "(load=[0, 0], ratios=[400, 100])")
+        self.assertEqual(exp, repr(balancer))
+
+    def test___eq__(self):
+        servers = [('ham1', 0.2), ('ham2', 0.8)]
+        balancer1 = balancing.WeightedRoundRobin(*servers)
+        balancer2 = balancing.WeightedRoundRobin(*servers)
+        self.assertTrue(balancer1 == balancer2)
+
+        servers = [('ham1', 0.2), ('ham2', 0.3), ('ham3', 0.5)]
+        balancer3 = balancing.WeightedRoundRobin(*servers)
+        self.assertFalse(balancer1 == balancer3)

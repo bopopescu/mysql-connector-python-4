@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -66,7 +66,7 @@ class MySQLProtocol(object):
             resplen = len(plugin_auth_response)
             auth_response = struct.pack('<B', resplen) + plugin_auth_response
         else:
-            auth_response += b'\x00'
+            auth_response = plugin_auth_response + b'\x00'
         return auth_response
 
     def make_auth(self, handshake, username=None, password=None, database=None,
@@ -599,7 +599,7 @@ class MySQLProtocol(object):
         return packet
 
     def make_stmt_execute(self, statement_id, data=(), parameters=(),
-                          flags=0, long_data_used=None):
+                          flags=0, long_data_used=None, charset='utf8'):
         """Make a MySQL packet with the Statement Execute command"""
         iteration_count = 1
         null_bitmap = [0] * ((len(data) + 7) // 8)
@@ -631,13 +631,17 @@ class MySQLProtocol(object):
                      flags) = self._prepare_binary_integer(value)
                     values.append(packed)
                 elif isinstance(value, str):
+                    value = value.encode(charset)
                     values.append(
-                        utils.intstore(len(value)) + value.encode('utf8'))
+                        utils.intstore(len(value)) + value)
                     field_type = FieldType.VARCHAR
+                elif isinstance(value, bytes):
+                    values.append(utils.intstore(len(value)) + value)
+                    field_type = FieldType.BLOB
                 elif isinstance(value, Decimal):
                     values.append(
-                        utils.intstore(len(str(value))) +\
-                            str(value).encode('utf8'))
+                        utils.intstore(len(str(value).encode(charset))) +
+                        str(value).encode(charset))
                     field_type = FieldType.DECIMAL
                 elif isinstance(value, float):
                     values.append(struct.pack('d', value))

@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -58,7 +58,7 @@ except ImportError:
         unittest.skip = test_skip
         unittest.skipIf = test_skip_if
     else:
-        LOGGER.error("Could not initilize Python's unittest module")
+        LOGGER.error("Could not initialize Python's unittest module")
         sys.exit(1)
 
 if sys.version_info[0] == 2:
@@ -96,6 +96,8 @@ MESSAGES = {
     'SKIPPED': [],
 }
 
+OPTIONS_INIT = False
+
 MYSQL_SERVERS_NEEDED = 1
 MYSQL_SERVERS = []
 MYSQL_VERSION = None
@@ -105,6 +107,8 @@ SSL_CA = os.path.abspath(os.path.join(SSL_DIR, 'tests_CA_cert.pem'))
 SSL_CERT = os.path.abspath(os.path.join(SSL_DIR, 'tests_client_cert.pem'))
 SSL_KEY = os.path.abspath(os.path.join(SSL_DIR, 'tests_client_key.pem'))
 TEST_BUILD_DIR = None
+
+DJANGO_VERSION = None
 
 __all__ = [
     'MySQLConnectorTests',
@@ -131,11 +135,16 @@ def get_test_modules():
     Returns a list of strings.
     """
     major = sys.version_info[0]
+
     testcases = []
 
     # For all python version
     for file_ in glob.glob(os.path.join('tests', 'test_*.py')):
         module = os.path.splitext(os.path.basename(file_))[0]
+        if OPTIONS_INIT and not DJANGO_VERSION and 'django' in module:
+            # Skip django testing completely when Django is not available.
+            LOGGER.warning("Django tests will not run: Django not available")
+            continue
         testcases.append(
             'tests.{module}'.format(module=module))
         LOGGER.debug('Added tests.{module}'.format(module=module))
@@ -151,6 +160,7 @@ def get_test_modules():
         LOGGER.debug('Added tests.py{major}.{module}'.format(
             major=major, module=module))
 
+    _CACHED_TESTCASES = testcases
     return testcases
 
 
@@ -351,10 +361,16 @@ class MySQLConnectorTests(unittest.TestCase):
             if not argument in function_arguments:
                 self.fail("Supported argument '{0}' fails".format(argument))
 
-    def _addSkip(self, result, reason):
-        add_skip = getattr(result, 'addSkip', None)
-        if add_skip:
-            add_skip(self, self._testMethodName + ': ' + reason)
+    if sys.version_info[0:2] >= (3, 4):
+        def _addSkip(self, result, test_case, reason):
+            add_skip = getattr(result, 'addSkip', None)
+            if add_skip:
+                add_skip(test_case, self._testMethodName + ': ' + reason)
+    else:
+        def _addSkip(self, result, reason):
+            add_skip = getattr(result, 'addSkip', None)
+            if add_skip:
+                add_skip(self, self._testMethodName + ': ' + reason)
 
     def run(self, result=None):
         if sys.version_info[0:2] == (2, 6):
@@ -499,7 +515,7 @@ def install_connector(root_dir, install_dir):
         'clean', '--all',  # necessary for removing the build/
         'install',
         '--root', install_dir,
-        '--install-lib', ''
+        '--install-lib', '.'
     ]
 
     prc = subprocess.Popen(cmd, stdin=subprocess.PIPE,

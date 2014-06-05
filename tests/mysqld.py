@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -44,13 +44,11 @@ LOGGER = logging.getLogger(tests.LOGGER_NAME)
 DEVNULL = open(os.devnull, 'w')
 
 
-# MySQL executables used
+# MySQL Server executable used
 if os.name == 'nt':
     EXEC_MYSQLD = 'mysqld.exe'
-    EXEC_MYSQL = 'mysql.exe'
 else:
     EXEC_MYSQLD = 'mysqld'
-    EXEC_MYSQL = 'mysql'
 
 
 def _convert_forward_slash(path):
@@ -81,6 +79,7 @@ def process_running(pid):
         output = subprocess.check_output("tasklist")
         lines = [line.split(None, 2) for line in output.splitlines() if line]
         for name, apid, _ in lines:
+            name = name.decode('utf-8')
             if name == EXEC_MYSQLD and pid == int(apid):
                 return True
         return False
@@ -117,7 +116,7 @@ def get_pid(pid_file):
     try:
         return int(open(pid_file, 'r').readline().strip())
     except IOError as err:
-        LOGGER.debug("Failed reading pid file: {0}".format(str(err)))
+        LOGGER.debug("Failed reading pid file: %s", err)
         return None
 
 
@@ -137,11 +136,10 @@ class MySQLServerBase(object):
 
     """Base for classes managing a MySQL server"""
 
-    def __init__(self, basedir, option_file=None):
+    def __init__(self, basedir, option_file=None, sharedir=None):
         self._basedir = basedir
-        self._bindir = None
         self._sbindir = None
-        self._sharedir = None
+        self._sharedir = sharedir
         self._scriptdir = None
         self._process = None
         self._lc_messages_dir = None
@@ -162,31 +160,52 @@ class MySQLServerBase(object):
         Raises MySQLBootstrapError when something fails.
         """
 
-        # Locate mysqld, mysql and english/errmsg.sys
+        # Locate mysqld, mysql binaries
+        LOGGER.info("Locating mysql binaries (could take a while)")
         for root, dirs, files in os.walk(self._basedir):
+            if self._sbindir:
+                break
             for afile in files:
                 if (afile == EXEC_MYSQLD and
                         os.access(os.path.join(root, afile), 0)):
                     self._sbindir = root
-                elif (afile == EXEC_MYSQL and
-                        os.access(os.path.join(root, afile), 0)):
-                    self._bindir = root
-                elif (afile == 'errmsg.sys' and 'english' in root):
-                    self._lc_messages_dir = root
-                elif (afile == 'mysql_system_tables.sql'):
-                    self._scriptdir = root
+                    break
 
-        if not self._bindir or not self._sbindir:
+        if not self._sbindir:
             raise MySQLBootstrapError(
                 "MySQL binaries not found under {0}".format(self._basedir))
 
-        LOGGER.debug("Location of {bin}: {loc}".format(bin=EXEC_MYSQL,
-                                                       loc=self._bindir))
-        LOGGER.debug("Location of {bin}: {loc}".format(bin=EXEC_MYSQLD,
-                                                       loc=self._sbindir))
+        # Try to locate errmsg.sys and mysql_system_tables.sql
+        if not self._sharedir:
+            match = self._get_mysqld_help_info(r'^lc-messages-dir\s+(.*)\s*$')
+            if match:
+                self._sharedir = match[0]
+            if not self._sharedir:
+                raise MySQLBootstrapError("Failed getting share folder. "
+                                          "Use --with-mysql-share.")
+        LOGGER.debug("Using share folder: %s", self._sharedir)
 
-        LOGGER.debug("Error messages: {loc}".format(loc=self._lc_messages_dir))
-        LOGGER.debug("SQL Script folder: {loc}".format(loc=self._scriptdir))
+        found = False
+        for root, dirs, files in os.walk(self._sharedir):
+            if found:
+                break
+            for afile in files:
+                if afile == 'errmsg.sys' and 'english' in root:
+                    self._lc_messages_dir = os.path.abspath(
+                        os.path.join(root, os.pardir)
+                    )
+                elif afile == 'mysql_system_tables.sql':
+                    self._scriptdir = root
+
+        if not self._lc_messages_dir or not self._scriptdir:
+            raise MySQLBootstrapError(
+                "errmsg.sys and mysql_system_tables.sql not found"
+                " under {0}".format(self._sharedir))
+
+        LOGGER.debug("Location of MySQL Server binaries: %s", self._sbindir)
+
+        LOGGER.debug("Error messages: %s", self._lc_messages_dir)
+        LOGGER.debug("SQL Script folder: %s", self._scriptdir)
 
     def _get_cmd(self):
         """Returns command to start MySQL server
@@ -203,6 +222,29 @@ class MySQLServerBase(object):
 
         return cmd
 
+    def _get_mysqld_help_info(self, needle):
+        """Get information from the mysqld binary help
+
+        This is basically a grep. Needle is a regular expression which
+        will be looked for in each line of the mysqld --help --verbose
+        output. We return the first match as a list.
+        """
+        cmd = [
+            os.path.join(self._sbindir, EXEC_MYSQLD),
+            '--help', '--verbose'
+        ]
+
+        prc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=DEVNULL)
+        help_verbose = prc.communicate()[0]
+        regex = re.compile(needle)
+        for help_line in help_verbose.splitlines():
+            help_line = help_line.decode('utf-8').strip()
+            match = regex.search(help_line)
+            if match:
+                return match.groups()
+
+        return []
+
     def _get_version(self):
         """Get the MySQL server version
 
@@ -217,7 +259,7 @@ class MySQLServerBase(object):
             '--version'
         ]
 
-        prc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        prc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=DEVNULL)
         verstr = str(prc.communicate()[0])
         matches = re.match(r'.*Ver (\d)\.(\d).(\d{1,2}).*', verstr)
         if matches:
@@ -261,7 +303,7 @@ class MySQLServer(MySQLServerBase):
 
     def __init__(self, basedir, topdir, cnf, bind_address, port,
                  name, datadir=None, tmpdir=None,
-                 unix_socket_folder=None, ssl_folder=None):
+                 unix_socket_folder=None, ssl_folder=None, sharedir=None):
         self._cnf = cnf
         self._option_file = os.path.join(topdir, 'my.cnf')
         self._bind_address = bind_address
@@ -280,10 +322,13 @@ class MySQLServer(MySQLServerBase):
         self._install = None
         self._server = None
         self._debug = False
+        self._sharedir = sharedir
 
         self.client_config = {}
 
-        super(MySQLServer, self).__init__(self._basedir, self._option_file)
+        super(MySQLServer, self).__init__(self._basedir,
+                                          self._option_file,
+                                          sharedir=self._sharedir)
 
     def _create_directories(self):
         """Create directory structure for bootstrapping
@@ -294,12 +339,15 @@ class MySQLServer(MySQLServerBase):
 
         Raises MySQLBootstrapError when something fails.
         """
-        LOGGER.debug("Creating {dir} {dir}/mysql and {dir}/test".format(
-            dir=self._datadir))
-        os.mkdir(self._topdir)
-        os.mkdir(os.path.join(self._topdir, 'tmp'))
-        os.mkdir(self._datadir)
-        os.mkdir(os.path.join(self._datadir, 'mysql'))
+        dirs = [
+            self._topdir,
+            os.path.join(self._topdir, 'tmp'),
+            self._datadir,
+            os.path.join(self._datadir, 'mysql')
+        ]
+        for adir in dirs:
+            LOGGER.debug("Creating directory %s", adir)
+            os.mkdir(adir)
 
     def _get_bootstrap_cmd(self):
         """Get the command for bootstrapping.
@@ -322,14 +370,15 @@ class MySQLServer(MySQLServerBase):
             '--tmpdir=%s' % self._tmpdir,
         ]
         if self._version[0:2] < (5, 5):
-            cmd.append('--language={0}'.format(self._lc_messages_dir))
+            cmd.append('--language={0}/english'.format(self._lc_messages_dir))
         else:
             cmd.extend([
                 '--lc-messages-dir={0}'.format(self._lc_messages_dir),
                 '--lc-messages=en_US'
-                ])
+            ])
         if self._version[0:2] >= (5, 1):
             cmd.append('--loose-skip-ndbcluster')
+
         return cmd
 
     def bootstrap(self):
@@ -357,30 +406,59 @@ class MySQLServer(MySQLServerBase):
             "CREATE DATABASE myconnpy;"
         ]
 
+        if self._version[0:3] >= (5, 7, 4):
+            # MySQL 5.7.4 only creates root@localhost
+            extra_sql.append(
+                "INSERT INTO mysql.user SELECT '127.0.0.1', `User`, `Password`,"
+                " `Select_priv`, `Insert_priv`, `Update_priv`, `Delete_priv`,"
+                " `Create_priv`, `Drop_priv`, `Reload_priv`, `Shutdown_priv`,"
+                " `Process_priv`, `File_priv`, `Grant_priv`, `References_priv`,"
+                " `Index_priv`, `Alter_priv`, `Show_db_priv`, `Super_priv`,"
+                " `Create_tmp_table_priv`, `Lock_tables_priv`, `Execute_priv`,"
+                " `Repl_slave_priv`, `Repl_client_priv`, `Create_view_priv`,"
+                " `Show_view_priv`, `Create_routine_priv`, "
+                "`Alter_routine_priv`,"
+                " `Create_user_priv`, `Event_priv`, `Trigger_priv`, "
+                "`Create_tablespace_priv`, `ssl_type`, `ssl_cipher`,"
+                "`x509_issuer`, `x509_subject`, `max_questions`, `max_updates`,"
+                "`max_connections`, `max_user_connections`, `plugin`,"
+                "`authentication_string`, `password_expired`,"
+                "`password_last_changed`, `password_lifetime` FROM mysql.user "
+                "WHERE `user` = 'root' and `host` = 'localhost';"
+            )
+
+        bootstrap_log = os.path.join(self._topdir, 'bootstrap.log')
         try:
             self._create_directories()
             cmd = self._get_bootstrap_cmd()
-            sql = []
-            sql.append("USE mysql;")
+            sql = ["USE mysql;"]
             for filename in script_files:
                 full_path = os.path.join(self._scriptdir, filename)
-                LOGGER.debug(
-                    "Reading SQL from '{path}'".format(path=full_path))
+                LOGGER.debug("Reading SQL from '%s'", full_path)
                 with open(full_path, 'r') as fp:
-                    sql += [line.strip() for line in fp.readlines()]
-            sql += extra_sql
-            logfile = open(os.path.join(self._topdir, 'bootstrap.log'), 'w')
+                    sql.extend([line.strip() for line in fp.readlines()])
+            sql.extend(extra_sql)
+            fp_log = open(bootstrap_log, 'w')
             prc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, stdout=logfile)
+                                   stderr=subprocess.STDOUT, stdout=fp_log)
             if sys.version_info[0] == 2:
                 prc.communicate('\n'.join(sql))
             else:
                 prc.communicate(bytearray('\n'.join(sql), 'utf8'))
-            logfile.close()
+            fp_log.close()
         except OSError as err:
             raise MySQLBootstrapError(
                 "Error bootstrapping MySQL '{name}': {error}".format(
                     name=self._name, error=str(err)))
+
+        with open(bootstrap_log, 'r') as fp:
+            log_lines = fp.readlines()
+            for log_line in log_lines:
+                if '[ERROR]' in log_line:
+                    err_msg = log_line.split('[ERROR]')[1].strip()
+                    raise MySQLBootstrapError(
+                        "Error bootstrapping MySQL '{name}': {error}".format(
+                            name=self._name, error=err_msg))
 
     @property
     def name(self):
@@ -428,7 +506,7 @@ class MySQLServer(MySQLServerBase):
             fp.write(self._cnf.format(**options))
             fp.close()
             self._start_server()
-            time.sleep(3)
+            time.sleep(5)
         except MySQLServerError as err:
             if self._debug is True:
                 raise
@@ -488,8 +566,7 @@ class MySQLServer(MySQLServerBase):
         try:
             rmtree(self._topdir)
         except OSError as err:
-            LOGGER.debug("Failed removing {folder}: {error}".format(
-                folder=self._topdir, error=err))
+            LOGGER.debug("Failed removing %s: %s", self._topdir, err)
             if self._debug is True:
                 raise
         else:
@@ -505,7 +582,7 @@ class MySQLServer(MySQLServerBase):
         """
         pid = pid or get_pid(self._pid_file)
         if pid:
-            LOGGER.debug("Got PID " + str(pid))
+            LOGGER.debug("Got PID %d", pid)
             return process_running(pid)
 
         return False

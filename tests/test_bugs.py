@@ -1660,7 +1660,8 @@ class BugOra17022399(tests.MySQLConnectorTests):
             cur.execute("SELECT 1")
         except mysql.connector.OperationalError as err:
             self.assertEqual(2055, err.errno)
-            self.assertTrue('9 ' in str(err))
+            # 10038 is a Windows socket error
+            self.assertTrue('9 ' in str(err) or '10038' in str(err))
 
     def test_execute_compressed(self):
         config = self.config.copy()
@@ -1672,7 +1673,8 @@ class BugOra17022399(tests.MySQLConnectorTests):
             cur.execute("SELECT 1")
         except mysql.connector.OperationalError as err:
             self.assertEqual(2055, err.errno)
-            self.assertTrue('9 ' in str(err))
+            # 10038 is a Windows socket error
+            self.assertTrue('9 ' in str(err) or '10038' in str(err))
 
 
 class BugOra16369511(tests.MySQLConnectorTests):
@@ -2294,3 +2296,170 @@ class BugOra16217765(tests.MySQLConnectorTests):
         except Exception as exc:
             self.fail("Connecting using {0} auth failed: {1}".format(
                 auth_plugin, exc))
+
+
+class BugOra18144971(tests.MySQLConnectorTests):
+    """BUG#18144971 ERROR WHEN USING UNICODE ARGUMENTS IN PREPARED STATEMENT"""
+    def setUp(self):
+        config = tests.get_mysql_config()
+        config['use_unicode'] = True
+        self.cnx = connection.MySQLConnection(**config)
+        self.cursor = self.cnx.cursor()
+
+        self.table = 'Bug18144971'
+        self.cursor.execute("DROP TABLE IF EXISTS {0}".format(self.table))
+
+        create = ("CREATE TABLE {0} ( "
+                  "`id` int(11) NOT NULL, "
+                  "`name` varchar(40) NOT NULL , "
+                  "`phone` varchar(40), "
+                  "PRIMARY KEY (`id`))"
+                  " CHARACTER SET 'utf8'".format(self.table))
+
+        self.cursor.execute(create)
+        self.table_cp1251 = 'Bug18144971_cp1251'
+        self.cursor.execute(
+            "DROP TABLE IF EXISTS {0}" .format(self.table_cp1251)
+        )
+
+        create = ("CREATE TABLE {0} ( "
+                  "`id` int(11) NOT NULL, "
+                  "`name` varchar(40) NOT NULL , "
+                  "`phone` varchar(40), "
+                  "PRIMARY KEY (`id`))"
+                  " CHARACTER SET 'cp1251'".format(self.table_cp1251))
+        self.cursor.execute(create)
+
+    def test_prepared_statement(self):
+        self.cur = self.cnx.cursor(prepared=True)
+        stmt = "INSERT INTO {0} VALUES (?,?,?)".format(
+               self.table)
+        data = BugOra18144971Extra.data
+        exp = BugOra18144971Extra.exp
+        self.cur.execute(stmt, data[0])
+        self.cnx.commit()
+        self.cur.execute("SELECT * FROM {0}".format(self.table))
+        self.assertEqual(self.cur.fetchall(), [exp[0]])
+
+        config = tests.get_mysql_config()
+        config['charset'] = 'cp1251'
+        self.cnx = connection.MySQLConnection(**config)
+        self.cur = self.cnx.cursor(prepared=True)
+        stmt = "INSERT INTO {0} VALUES (?,?,?)".format(
+               self.table_cp1251)
+        self.cur.execute(stmt, data[1])
+        self.cnx.commit()
+        self.cur.execute("SELECT * FROM {0}".format(self.table_cp1251))
+        self.assertEqual(self.cur.fetchall(), [exp[1]])
+
+
+class BugOra18389196(tests.MySQLConnectorTests):
+    """BUG#18389196:  INSERTING PARAMETER MULTIPLE TIMES IN STATEMENT
+    """
+    def setUp(self):
+        config = tests.get_mysql_config()
+        self.cnx = connection.MySQLConnection(**config)
+        self.cursor = self.cnx.cursor()
+
+        self.tbl = 'Bug18389196'
+        self.cursor.execute("DROP TABLE IF EXISTS %s" % self.tbl)
+
+        create = ("CREATE TABLE %s ( "
+                  "`id` int(11) NOT NULL, "
+                  "`col1` varchar(20) NOT NULL, "
+                  "`col2` varchar(20) NOT NULL, "
+                  "PRIMARY KEY (`id`))" % self.tbl)
+        self.cursor.execute(create)
+
+    def tearDown(self):
+        self.cursor.execute("DROP TABLE IF EXISTS %s" % self.tbl)
+        self.cursor.close()
+        self.cnx.close()
+
+    def test_parameters(self):
+        stmt = ("INSERT INTO {0} (id,col1,col2) VALUES "
+                "(%(id)s,%(name)s,%(name)s)".format(
+                self.tbl))
+        try:
+            self.cursor.execute(stmt, {'id': 1, 'name': 'ABC'})
+        except errors.ProgrammingError as err:
+            self.fail("Inserting parameter multiple times in a statement "
+                      "failed: %s" %
+                      err)
+
+
+class BugOra18415927(tests.MySQLConnectorTests):
+
+    """BUG#18415927: AUTH_RESPONSE VARIABLE INCREMENTED WITHOUT BEING DEFINED
+    """
+
+    user = {
+        'username': 'nativeuser',
+        'password': 'nativeP@ss',
+    }
+
+    def setUp(self):
+        config = tests.get_mysql_config()
+        host = config['host']
+        database = config['database']
+        cnx = connection.MySQLConnection(**config)
+        try:
+            cnx.cmd_query("DROP USER '{user}'@'{host}'".format(
+                host=host,
+                user=self.user['username']))
+        except:
+            pass
+
+        create_user = "CREATE USER '{user}'@'{host}' "
+        cnx.cmd_query(create_user.format(user=self.user['username'],
+                                         host=host))
+
+        passwd = ("SET PASSWORD FOR '{user}'@'{host}' = "
+                  "PASSWORD('{password}')").format(
+                      user=self.user['username'], host=host,
+                      password=self.user['password'])
+
+        cnx.cmd_query(passwd)
+
+        grant = "GRANT ALL ON {database}.* TO '{user}'@'{host}'"
+        cnx.cmd_query(grant.format(database=database,
+                                   user=self.user['username'],
+                                   host=host))
+
+    def tearDown(self):
+        config = tests.get_mysql_config()
+        host = config['host']
+        cnx = connection.MySQLConnection(**config)
+        cnx.cmd_query("DROP USER '{user}'@'{host}'".format(
+            host=host,
+            user=self.user['username']))
+
+    def test_auth_response(self):
+        config = tests.get_mysql_config()
+        config['unix_socket'] = None
+        config['user'] = self.user['username']
+        config['password'] = self.user['password']
+        config['client_flags'] = [-constants.ClientFlag.SECURE_CONNECTION]
+        try:
+            cnx = connection.MySQLConnection(**config)
+        except Exception as exc:
+            self.fail("Connection failed: {0}".format(exc))
+
+
+class BugOra18527437(tests.MySQLConnectorTests):
+    """BUG#18527437: UNITTESTS FAILING WHEN --host=::1 IS PASSED AS ARGUMENT
+    """
+    def test_poolname(self):
+        config = tests.get_mysql_config()
+        config['host'] = '::1'
+        config['pool_size'] = 3
+
+        exp = '{0}_{1}_{2}_{3}'.format(config['host'], config['port'],
+                                       config['user'], config['database'])
+        self.assertEqual(exp, pooling.generate_pool_name(**config))
+
+    def test_custom_poolname(self):
+        cnxpool = pooling.MySQLConnectionPool(pool_name='ham:spam',
+                                              **tests.get_mysql_config())
+        self.assertEqual('ham:spam', cnxpool._pool_name)
+        cnxpool._remove_connections()

@@ -1,11 +1,31 @@
 MySQL Connector/Python - Release Notes / ChangeLog
-Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
 
 Full release notes:
  http://dev.mysql.com/doc/relnotes/connector-python/en/
 
-1.2.1 (not yet release)
---------------------------
+1.2.2 (2014-05-27)
+------------------
+* BUG#18676741: Fixed bootstrapping tests using MySQL 5.5
+* BUG#17995416: Fixed WRR scheduling for Fabric
+* BUG#17957509: Added ReadMe and License files when installing DMG
+* BUG#18380134: Fixed Connector/Python to work with south
+* BUG#18527437: Fixed failing of unittests when --host=::1 is an argument
+* BUG#18550039: Fixed building RPM for Connector/Python
+* BUG#18415927: Fixed authentication with SECURE_CONNECTION unset
+* BUG#18422727: Removed GPL license in the commercial deb package
+* BUG#18527132: Fixed presence of empty documents in MSI build
+* BUG#18463182: Fixed user argument for Fabric
+* BUG#18511061: Fix unittest compatibility with MySQL 5.7.4
+* BUG#18389196: Fixed inserting parameters multiple times in a statement
+* BUG#18258807: Fixed raising better error with unconvertible python type
+* BUG#18144971: Error with unicode arguments in prepared statements
+* BUG#18465031: Fixed Python v3 tests on Windows
+* BUG#18380100: Fix introspection for Django and Python v3
+* BUG#18465605: Fixed testing using relative server folder
+
+1.2.1 (2014-03-31)
+------------------
 * WL#7387: Reporting failures to Fabric
 * WL#6166: Added connection fail-over support
 * WL#7542: Added method for clearing session state

@@ -497,7 +497,7 @@ class MySQLCursor(CursorBase):
         if params is not None:
             if isinstance(params, dict):
                 for key, value in self._process_params_dict(params).items():
-                    stmt = stmt.replace(key, value, 1)
+                    stmt = stmt.replace(key, value)
             elif isinstance(params, (list, tuple)):
                 psub = _ParamSubstitutor(self._process_params(params))
                 stmt = RE_PY_PARAM.sub(psub, stmt)
@@ -552,7 +552,7 @@ class MySQLCursor(CursorBase):
                 tmp = fmt
                 if isinstance(params, dict):
                     for key, value in self._process_params_dict(params).items():
-                        tmp = tmp.replace(key, value, 1)
+                        tmp = tmp.replace(key, value)
                 else:
                     psub = _ParamSubstitutor(self._process_params(params))
                     tmp = RE_PY_PARAM.sub(psub, tmp)

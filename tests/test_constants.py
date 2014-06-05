@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -118,7 +118,7 @@ class FieldTypeTests(tests.MySQLConnectorTests):
         self.assertEqual('FIELD_TYPE_', constants.FieldType.prefix)
 
         for key, value in self.desc.items():
-            self.failUnless(key in constants.FieldType.__dict__,
+            self.assertTrue(key in constants.FieldType.__dict__,
                             '{0} is not an attribute of FieldType'.format(key))
             self.assertEqual(
                 value[0], constants.FieldType.__dict__[key],
@@ -200,7 +200,7 @@ class FieldFlagTests(tests.MySQLConnectorTests):
         self.assertEqual('', constants.FieldFlag._prefix)
 
         for key, value in self.desc.items():
-            self.failUnless(key in constants.FieldFlag.__dict__,
+            self.assertTrue(key in constants.FieldFlag.__dict__,
                             '{0} is not an attribute of FieldFlag'.format(key))
             self.assertEqual(
                 value[0], constants.FieldFlag.__dict__[key],
@@ -299,7 +299,8 @@ class CharacterSetTests(tests.MySQLConnectorTests):
             'euckr', 'latin7', 'koi8u', 'gb2312', 'greek', 'cp1250', 'gbk',
             'cp1257', 'latin5', 'armscii8', 'utf8', 'ucs2', 'cp866', 'keybcs2',
             'macce', 'macroman', 'cp852', 'utf8mb4','utf16', 'utf16le',
-            'cp1256', 'utf32', 'binary', 'geostd8', 'cp932', 'eucjpms'
+            'cp1256', 'utf32', 'binary', 'geostd8', 'cp932', 'eucjpms',
+            'gb18030',
         )
 
         self.assertEqual(exp, constants.CharacterSet.get_supported())
@@ -381,7 +382,7 @@ class ShutdownTypeTests(tests.MySQLConnectorTests):
         self.assertEqual('', constants.ShutdownType.prefix)
 
         for key, value in self.desc.items():
-            self.failUnless(key in constants.ShutdownType.__dict__,
+            self.assertTrue(key in constants.ShutdownType.__dict__,
                             '{0} is not an attribute of FieldType'.format(key))
             self.assertEqual(
                 value[0], constants.ShutdownType.__dict__[key],

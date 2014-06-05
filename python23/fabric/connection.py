@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2013, 2014 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -283,7 +283,7 @@ class Fabric(object):
                  connect_attempts=_CNX_ATTEMPT_MAX,
                  connect_delay=_CNX_ATTEMPT_DELAY,
                  report_errors=False,
-                 ssl_ca=None, ssl_key=None, ssl_cert=None):
+                 ssl_ca=None, ssl_key=None, ssl_cert=None, user=None):
         """Initialize"""
         self._fabric_instances = {}
         self._fabric_uuid = None
@@ -295,10 +295,13 @@ class Fabric(object):
         self._group_balancers = {}
         self._init_host = host
         self._init_port = port
-        self._username = username
-        self._password = password
         self._ssl = _validate_ssl_args(ssl_ca, ssl_key, ssl_cert)
         self._report_errors = report_errors
+
+        if user and username:
+            raise ValueError("can not specify both user and username")
+        self._username = user or username
+        self._password = password
 
     @property
     def username(self):

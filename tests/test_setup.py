@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -76,6 +76,7 @@ class MetaSetupInfoTests(tests.MySQLConnectorTests):
         exp = {
             'a': '3 - Alpha',
             'b': '4 - Beta',
+            'rc': '4 - Beta',
             '': '5 - Production/Stable'
         }
         self.assertEqual(exp, metasetupinfo.DEVELOPMENT_STATUSES)

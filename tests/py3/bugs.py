@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2013, 2014 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -150,7 +150,7 @@ class BugOra17780576Extra(object):
 
 class BugOra17965619Extra(object):
 
-    """Extras for test case test_bugs.BugOra17079344"""
+    """Extras for test case test_bugs.BugOra17965619"""
 
     data = b'\xf0\xf1\xf2'
 
@@ -180,3 +180,11 @@ class BugOra18220593(tests.MySQLConnectorTests):
         self.cur.execute("DROP TABLE IF EXISTS {0}".format(self.table))
         self.cur.close()
         self.cnx.close()
+
+
+class BugOra18144971Extra(object):
+
+    """Extras for test case test_bugs.BugOra18144971"""
+
+    data = [(1, b'bytes', '1234'), (2, 'aaaаффф', '1111')]
+    exp = [(1, b'bytes', b'1234'), (2, 'aaaаффф'.encode('cp1251'), b'1111')]

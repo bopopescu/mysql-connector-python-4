@@ -63,7 +63,7 @@ import unittest
 import logging
 try:
     from argparse import ArgumentParser
-except:
+except ImportError:
     # Python v2.6
     from optparse import OptionParser
 
@@ -81,10 +81,9 @@ LOGGER = logging.getLogger(tests.LOGGER_NAME)
 tests.setup_logger(LOGGER)
 
 # Only run for supported Python Versions
-if not ((sys.version_info >= (2, 6) and sys.version_info < (3, 0))
-        or sys.version_info >= (3, 1)):
-    LOGGER.error("Python v{0}.{1} is not supported".format(
-        *sys.version_info[0:2]))
+if not (((2, 6) <= sys.version_info < (3, 0)) or sys.version_info >= (3, 1)):
+    LOGGER.error("Python v%d.%d is not supported",
+                 sys.version_info[0], sys.version_info[1])
 else:
     # The following is only needed for running examples tests
     sys.path.insert(0, os.path.join(
@@ -95,6 +94,7 @@ else:
     sys.path.insert(0, tests.TEST_BUILD_DIR)
 
 import mysql.connector
+
 
 # MySQL option file template. Platform specifics dynamically added later.
 MY_CNF = """
@@ -112,11 +112,11 @@ lc_messages = en_US
 general_log = ON
 
 [mysqld-5.1]
-language = {lc_messages_dir}
+language = {lc_messages_dir}/english
 general_log = ON
 
 [mysqld-5.0]
-language = {lc_messages_dir}
+language = {lc_messages_dir}/english
 
 [mysqld]
 basedir = {basedir}
@@ -248,6 +248,13 @@ _UNITTESTS_CMD_ARGS = {
             "(default {default})").format(default=MYSQL_DEFAULT_BASE)
     },
 
+    ('', '--with-mysql-share'): {
+        'dest': 'mysql_sharedir', 'metavar': 'NAME',
+        'default': None,
+        'help': (
+            "share folder of the MySQL server (default <basedir>/share)")
+    },
+
     ('', '--mysql-topdir'): {
         'dest': 'mysql_topdir', 'metavar': 'NAME',
         'default': MYSQL_DEFAULT_TOPDIR,
@@ -283,6 +290,13 @@ _UNITTESTS_CMD_ARGS = {
             'Use IPv6 to run tests. This sets --bind-address=:: --host=::1.'
         ),
     },
+
+    ('', '--with-django'): {
+        'dest': 'django_path', 'metavar': 'NAME',
+        'default': None,
+        'help': ("Location of Django (none installed source)")
+    },
+
 }
 
 
@@ -295,11 +309,11 @@ def _get_arg_parser():
     """
     def _clean_optparse(adict):
         """Remove items from dictionary ending with _optparse"""
-        new = {}
+        new_dict = {}
         for key in adict.keys():
             if not key.endswith('_optparse'):
-                new[key] = adict[key]
-        return new
+                new_dict[key] = adict[key]
+        return new_dict
 
     new = True
     try:
@@ -366,7 +380,10 @@ class StatsTestResult(TextTestResult):
         self._dbcnx = dbcnx
         self._name = None
 
-    def get_description(self, test):  # pylint: disable=R0201
+    @staticmethod
+    def get_description(test):  # pylint: disable=R0201
+        """Return test description, if needed truncated to 60 characters
+        """
         return "{0:.<60s} ".format(str(test)[0:58])
 
     def startTest(self, test):
@@ -481,11 +498,12 @@ class BasicTestRunner(unittest.TextTestRunner):
     resultclass = BasicTestResult
 
     def __init__(self, stream=sys.stderr, descriptions=True, verbosity=1,
-                 failfast=False, buffer=False):
+                 failfast=False, buffer=False, warnings='ignore'):
         try:
             super(BasicTestRunner, self).__init__(
                 stream=stream, descriptions=descriptions,
-                verbosity=verbosity, failfast=failfast, buffer=buffer)
+                verbosity=verbosity, failfast=failfast, buffer=buffer,
+                warnings=warnings)
         except TypeError:
             # Python v3.1
             super(BasicTestRunner, self).__init__(
@@ -556,11 +574,17 @@ def init_mysql_server(port, options):
             port=port,
             unix_socket_folder=options.unix_socket_folder,
             ssl_folder=os.path.abspath(tests.SSL_DIR),
-            name=name)
+            name=name,
+            sharedir=options.mysql_sharedir)
     except tests.mysqld.MySQLBootstrapError as err:
         LOGGER.error("Failed initializing MySQL server "
-                     "'{name}': {error} (use --with-mysql?)".format(
+                     "'{name}': {error}".format(
                          name=name, error=str(err)))
+        sys.exit(1)
+
+    if len(mysql_server.unix_socket) > 103:
+        LOGGER.error("Unix socket file is to long for mysqld (>103). "
+                     "Consider using --unix-socket")
         sys.exit(1)
 
     mysql_server._debug = options.debug
@@ -596,11 +620,11 @@ def init_mysql_server(port, options):
     mysql_server.client_config = {
         'host': options.host,
         'port': port,
-        'unix_socket': mysql_server._unix_socket,
+        'unix_socket': mysql_server.unix_socket,
         'user': 'root',
         'password': '',
         'database': 'myconnpy',
-        'connection_timeout': 5,
+        'connection_timeout': 10,
     }
 
     # Bootstrap and start a MySQL server
@@ -608,9 +632,9 @@ def init_mysql_server(port, options):
         LOGGER.info("Bootstrapping MySQL server '{name}'".format(name=name))
         try:
             mysql_server.bootstrap()
-        except tests.mysqld.MySQLBootstrapError:
-            LOGGER.error("Failed bootstrapping MySQL server '{name}'".format(
-                name=name))
+        except tests.mysqld.MySQLBootstrapError as exc:
+            LOGGER.error("Failed bootstrapping MySQL server '{name}': "
+                         "{error}".format(name=name, error=str(exc)))
             sys.exit(1)
         mysql_server.start()
         if not mysql_server.wait_up():
@@ -622,6 +646,7 @@ def init_mysql_server(port, options):
 def main():
     parser = _get_arg_parser()
     options = parser.parse_args()
+    tests.OPTIONS_INIT = True
 
     if isinstance(options, tuple):
         # Fallback to old optparse
@@ -629,8 +654,7 @@ def main():
 
     tests.setup_logger(LOGGER, debug=options.debug, logfile=options.logfile)
     LOGGER.info(
-        "MySQL Connector/Python unittest "
-        "started using Python v{0}".format(
+        "MySQL Connector/Python unittest using Python v{0}".format(
             '.'.join([str(v) for v in sys.version_info[0:3]])))
 
     # Check if we can test IPv6
@@ -644,10 +668,40 @@ def main():
     else:
         tests.IPV6_AVAILABLE = False
 
+    if not options.mysql_sharedir:
+        options.mysql_sharedir = os.path.join(options.mysql_basedir, 'share')
+        LOGGER.debug("Setting default sharedir: %s", options.mysql_sharedir)
+    if options.mysql_topdir != MYSQL_DEFAULT_TOPDIR:
+        # Make sure the topdir is absolute
+        if not os.path.isabs(options.mysql_topdir):
+            options.mysql_topdir = os.path.join(
+                os.path.dirname(os.path.realpath(__file__)),
+                options.mysql_topdir
+            )
+
+    # If Django was supplied, add Django to PYTHONPATH
+    if options.django_path:
+        sys.path.insert(0, options.django_path)
+        try:
+            import django
+            tests.DJANGO_VERSION = django.VERSION[0:3]
+        except ImportError:
+            msg = "Could not find django package at {0}".format(
+                options.django_path)
+            LOGGER.error(msg)
+            sys.exit(1)
+
+        if sys.version_info[0] == 3 and tests.DJANGO_VERSION < (1, 5):
+            LOGGER.error("Django older than v1.5 will not work with Python 3")
+            sys.exit(1)
+
     # We have to at least run 1 MySQL server
     init_mysql_server(port=(options.port), options=options)
 
     # Which tests cases to run
+    testcases = []
+    testsuite = None
+
     if options.testcase:
         if options.testcase in tests.get_test_names():
             for module in tests.get_test_modules():
@@ -669,9 +723,8 @@ def main():
     for i in range(1, tests.MYSQL_SERVERS_NEEDED):
         init_mysql_server(port=(options.port + i), options=options)
 
-    LOGGER.info(
-        "Using MySQL server version {0}".format(
-            '.'.join([str(v) for v in tests.MYSQL_VERSION[0:3]])))
+    LOGGER.info("Using MySQL server version %s",
+                '.'.join([str(v) for v in tests.MYSQL_VERSION[0:3]]))
 
     LOGGER.info("Starting unit tests")
     was_successful = False
@@ -691,14 +744,12 @@ def main():
             else:
                 cnxstats = None
             result = StatsTestRunner(
-                verbosity=options.verbosity, dbcnx=cnxstats).run(
-                testsuite)
+                verbosity=options.verbosity, dbcnx=cnxstats).run(testsuite)
         elif sys.version_info[0:2] == (2, 6):
             result = Python26TestRunner(verbosity=options.verbosity).run(
                 testsuite)
         else:
-            result = BasicTestRunner(verbosity=options.verbosity).run(
-                testsuite)
+            result = BasicTestRunner(verbosity=options.verbosity).run(testsuite)
         was_successful = result.wasSuccessful()
     except KeyboardInterrupt:
         LOGGER.info("Unittesting was interrupted")
@@ -712,9 +763,7 @@ def main():
 
     # Show skipped tests
     if len(tests.MESSAGES['SKIPPED']):
-        LOGGER.info(
-            "Skipped tests: {0}".format(
-                len(tests.MESSAGES['SKIPPED'])))
+        LOGGER.info("Skipped tests: %d", len(tests.MESSAGES['SKIPPED']))
         if options.verbosity >= 1 or options.debug:
             for msg in tests.MESSAGES['SKIPPED']:
                 LOGGER.info(msg)
@@ -725,30 +774,31 @@ def main():
         if not options.keep:
             mysql_server.stop()
             if not mysql_server.wait_down():
-                LOGGER.error("Failed stopping MySQL server '{name}'".format(
-                    name=name))
+                LOGGER.error("Failed stopping MySQL server '%s'", name)
             else:
                 mysql_server.remove()
-                LOGGER.info(
-                    "MySQL server '{name}' stopped and cleaned up".format(
-                        name=name))
+                LOGGER.info("MySQL server '%s' stopped and cleaned up", name)
         elif not mysql_server.check_running():
             mysql_server.start()
             if not mysql_server.wait_up():
                 LOGGER.error("MySQL could not be kept running; "
                              "failed to restart")
         else:
-            LOGGER.info("MySQL server kept running on {addr}:{port}".format(
-                addr=mysql_server.bind_address,
-                port=mysql_server.port)
+            LOGGER.info("MySQL server kept running on %s:%d",
+                mysql_server.bind_address,
+                mysql_server.port
             )
+
+    # Make sure the DEVNULL file is closed
+    try:
+        mysqld.DEVNULL.close()
+    except:
+        pass
 
     txt = ""
     if not was_successful:
         txt = "not "
-    LOGGER.info(
-        "MySQL Connector/Python unittests were {result}successful".format(
-            result=txt))
+    LOGGER.info("MySQL Connector/Python unittests were %ssuccessful", txt)
 
     # Return result of tests as exit code
     sys.exit(not was_successful)

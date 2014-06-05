@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -28,6 +28,7 @@
 from decimal import Decimal
 import datetime
 import time
+import uuid
 
 import tests
 from mysql.connector import conversion, constants
@@ -122,7 +123,7 @@ class MySQLConverterTests(tests.MySQLConnectorTests):
         )
 
         res = tuple([self.cnv.escape(v) for v in data])
-        self.failUnless(res, exp)
+        self.assertTrue(res, exp)
 
     def test_quote(self):
         """Quote values making them ready for MySQL operations."""
@@ -146,7 +147,7 @@ class MySQLConverterTests(tests.MySQLConnectorTests):
         )
 
         res = tuple([self.cnv.quote(value) for value in data])
-        self.failUnlessEqual(res, exp)
+        self.assertEqual(res, exp)
 
     def test_to_mysql(self):
         """Convert Python types to MySQL types using helper method"""
@@ -181,7 +182,8 @@ class MySQLConverterTests(tests.MySQLConnectorTests):
         )
 
         res = tuple([self.cnv.to_mysql(value) for value in data])
-        self.failUnlessEqual(res, exp)
+        self.assertEqual(res, exp)
+        self.assertRaises(TypeError, self.cnv.to_mysql, uuid.uuid4())
 
     def test__str_to_mysql(self):
         """A Python string becomes bytes."""
@@ -308,7 +310,7 @@ class MySQLConverterTests(tests.MySQLConnectorTests):
         )
 
         res = tuple([self.cnv.to_python(v[1], v[0]) for v in data])
-        self.failUnlessEqual(res, exp)
+        self.assertEqual(res, exp)
 
     def test__FLOAT_to_python(self):
         """Convert a MySQL FLOAT/DOUBLE to a Python float type"""

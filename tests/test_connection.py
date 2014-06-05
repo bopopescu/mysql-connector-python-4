@@ -987,7 +987,7 @@ class MySQLConnectionTests(tests.MySQLConnectorTests):
         self.cnx._charset_id = 33
         self.cnx._autocommit = True
         self.cnx._time_zone = "-09:00"
-        self.cnx._sql_mode = "NO_ZERO_DATE"
+        self.cnx._sql_mode = "STRICT_ALL_TABLES"
         self.cnx._post_connection()
         self.assertEqual('utf8', self.cnx.charset)
         self.assertEqual(self.cnx._autocommit, self.cnx.autocommit)
@@ -1367,9 +1367,14 @@ class MySQLConnectionTests(tests.MySQLConnectorTests):
             self.fail("Failed setting SQL Mode")
 
         # Set SQL Mode to a list of modes
-        exp = ('STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,'
-               'NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,TRADITIONAL,'
-               'NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION')
+        if tests.MYSQL_VERSION[0:3] < (5, 7, 4):
+            exp = ('STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,'
+                   'NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,TRADITIONAL,'
+                   'NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION')
+        else:
+            exp = ('STRICT_TRANS_TABLES,STRICT_ALL_TABLES,TRADITIONAL,'
+                   'NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION')
+
         try:
             self.cnx.set_sql_mode(exp)
             result = self.cnx.get_sql_mode()
@@ -1380,7 +1385,7 @@ class MySQLConnectionTests(tests.MySQLConnectorTests):
         self.assertEqual(exp, result)
 
         exp = sorted([
-            constants.SQLMode.NO_ZERO_DATE,
+            constants.SQLMode.STRICT_ALL_TABLES,
             constants.SQLMode.REAL_AS_FLOAT
         ])
         self.cnx.sql_mode = exp
@@ -1396,7 +1401,7 @@ class MySQLConnectionTests(tests.MySQLConnectorTests):
         self.assertEqual('', self.cnx.get_sql_mode())
 
         # Set SQL Mode and check
-        sql_mode = exp = 'NO_ZERO_IN_DATE'
+        sql_mode = exp = 'STRICT_ALL_TABLES'
         self.cnx.set_sql_mode(sql_mode)
         self.assertEqual(exp, self.cnx.get_sql_mode())
 
@@ -1410,7 +1415,7 @@ class MySQLConnectionTests(tests.MySQLConnectorTests):
         config['sql_mode'] = ''
         self.cnx = connection.MySQLConnection(**config)
 
-        sql_mode = exp = 'NO_ZERO_IN_DATE'
+        sql_mode = exp = 'STRICT_ALL_TABLES'
         self.cnx.sql_mode = sql_mode
         self.assertEqual(exp, self.cnx.sql_mode)
 
@@ -1722,12 +1727,12 @@ class MySQLConnectionTests(tests.MySQLConnectorTests):
                               self.cnx.cmd_reset_connection)
         else:
             exp_session_id = self.cnx.connection_id
-            selfcnx.cmd_query("SET @ham = 2")
-            selfcnx.cmd_reset_connection()
+            self.cnx.cmd_query("SET @ham = 2")
+            self.cnx.cmd_reset_connection()
 
             self.cnx.cmd_query("SELECT @ham")
             self.assertEqual(exp_session_id, self.cnx.connection_id)
             if sys.version_info[0] == 2:
-                self.assertNotEqual(('2',), pcnx.get_rows()[0][0])
+                self.assertNotEqual(('2',), self.cnx.get_rows()[0][0])
             else:
-                self.assertNotEqual((b'2',), pcnx.get_rows()[0][0])
+                self.assertNotEqual((b'2',), self.cnx.get_rows()[0][0])
