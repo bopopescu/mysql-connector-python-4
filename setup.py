@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -31,7 +31,6 @@ To install MySQL Connector/Python:
 
 """
 
-import sys
 from distutils.core import setup
 from distutils.command.install import INSTALL_SCHEMES
 
@@ -39,22 +38,28 @@ from distutils.command.install import INSTALL_SCHEMES
 for install_scheme in INSTALL_SCHEMES.values():
     install_scheme['data'] = install_scheme['purelib']
 
-import metasetupinfo
+import setupinfo
+try:
+    from cpyint import metasetupinfo
+    setupinfo.command_classes = metasetupinfo.command_classes
+except (ImportError, AttributeError):
+    # python-internal not available
+    pass
 
 setup(
-    name = metasetupinfo.name,
-    version = metasetupinfo.version,
-    description = metasetupinfo.description,
-    long_description = metasetupinfo.long_description,
-    author = metasetupinfo.author,
-    author_email = metasetupinfo.author_email,
-    license = metasetupinfo.license,
-    keywords = metasetupinfo.keywords,
-    url = metasetupinfo.url,
-    download_url = metasetupinfo.download_url,
-    package_dir = metasetupinfo.package_dir,
-    packages = metasetupinfo.packages,
-    classifiers = metasetupinfo.classifiers,
-    cmdclass = metasetupinfo.cmdclasses
+    name=setupinfo.name,
+    version=setupinfo.version,
+    description=setupinfo.description,
+    long_description=setupinfo.long_description,
+    author=setupinfo.author,
+    author_email=setupinfo.author_email,
+    license=setupinfo.cpy_gpl_license,
+    keywords=setupinfo.keywords,
+    url=setupinfo.url,
+    download_url=setupinfo.download_url,
+    package_dir=setupinfo.package_dir,
+    packages=setupinfo.packages,
+    classifiers=setupinfo.classifiers,
+    cmdclass=setupinfo.command_classes
 )
 
