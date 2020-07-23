@@ -598,7 +598,7 @@ class FabricTests(tests.MySQLConnectorTests):
         self.assertRaises(errors.InterfaceError, fab.get_group_server,
                           'emptygroup')
 
-        # Request PRIMARY (master)
+        # Request PRIMARY (main)
         exp = fab.get_group_servers('testgroup1')[1]
         self.assertEqual(
             exp,
